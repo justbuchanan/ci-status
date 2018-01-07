@@ -19,6 +19,7 @@ var username string
 var repo string
 var rev string
 var verbose bool
+var dontPrintCommand bool
 var status = &github.RepoStatus{
 	TargetURL:   new(string),
 	State:       new(string),
@@ -35,6 +36,7 @@ func main() {
 	flag.StringVar(&repo, "repo", "", "Repository name.")
 	flag.StringVar(&rev, "rev", "", "Git commit/revision specifier")
 	flag.BoolVar(&verbose, "verbose", false, "extra logging")
+	flag.BoolVar(&dontPrintCommand, "h", false, "Don't print command in the output. Use this if it contains secret tokens, etc.")
 
 	flag.StringVar(status.TargetURL, "target_url", "", "Url that this status should redirect to.")
 	flag.StringVar(status.Context, "context", "status", "Unique string identifier for this status. Something like 'compile', 'test', or 'deploy'.")
@@ -111,7 +113,9 @@ func main() {
 	cmd := exec.Command("bash", "-c", taskCmd)
 	cmd.Stdout = logfile
 	cmd.Stderr = logfile
-	log.Println("Running task command:", taskCmd)
+	if !dontPrintCommand {
+		log.Println("Running task command:", taskCmd)
+	}
 	log.Println("Logging to", logfilePath)
 
 	// run it!
