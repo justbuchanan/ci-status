@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"github.com/google/go-github/github"
 	"golang.org/x/oauth2"
+	"io"
 	"io/ioutil"
 	"log"
 	"os"
@@ -111,10 +112,22 @@ func main() {
 
 	// create command, logging outputs to logfile
 	cmd := exec.Command("bash", "-c", taskCmd)
-	cmd.Stdout = logfile
-	cmd.Stderr = logfile
+
+	if true {
+		// print command output to logfile and stderr
+		mw := io.MultiWriter(os.Stderr, logfile)
+
+		cmd.Stdout = mw
+		cmd.Stderr = mw
+	} else {
+		cmd.Stdout = logfile
+		cmd.Stderr = logfile
+	}
+
 	if !dontPrintCommand {
 		log.Println("Running task command:", taskCmd)
+	} else {
+		log.Println("Running task command")
 	}
 	log.Println("Logging to", logfilePath)
 
