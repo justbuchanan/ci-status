@@ -7,7 +7,6 @@ import (
 	"github.com/google/go-github/github"
 	"golang.org/x/oauth2"
 	"io"
-	"io/ioutil"
 	"log"
 	"os"
 	"os/exec"
@@ -146,14 +145,6 @@ func main() {
 	postStatus(client, ctx)
 
 	if status.GetState() == "failure" {
-		logData, err := ioutil.ReadFile(logfilePath)
-		if err != nil {
-			log.Fatal(err)
-		}
-		// print log to stderr
-		fmt.Fprintln(os.Stderr, "Log contents:")
-		fmt.Fprintln(os.Stderr, string(logData))
-
 		os.Exit(1)
 	}
 }
