@@ -14,19 +14,52 @@ import (
 	"strings"
 )
 
-var token string
-var username string
-var repo string
-var rev string
-var verbose bool
-var dontPrintCommand bool
-var status = &github.RepoStatus{
-	TargetURL:   new(string),
-	State:       new(string),
-	Description: new(string),
-	Context:     new(string),
+var (
+	token                 string
+	username              string
+	repo                  string
+	rev                   string
+	verbose               bool
+	fakeGithubInteraction bool
+	dontPrintCommand      bool
+	status                = &github.RepoStatus{
+		TargetURL:   new(string),
+		State:       new(string),
+		Description: new(string),
+		Context:     new(string),
+	}
+	artifactsDir string
+)
+
+func loadCircleEnv(artifactName string) {
+	defaultToEnv(&username, "CIRCLE_PROJECT_USERNAME")
+	defaultToEnv(&repo, "CIRCLE_PROJECT_REPONAME")
+	defaultToEnv(&rev, "CIRCLE_SHA1")
+	defaultToEnv(&artifactsDir, "CIRCLE_ARTIFACTS")
+
+	if status.GetTargetURL() == "" {
+		// "https://circleci.com/api/v1.1/project/:vcs-type/:org-name/:repo-name/:build_num/artifacts/:container-index/path/to/artifact"
+		// TODO: bitbucket?
+		buildNum := os.Getenv("CIRCLE_BUILD_NUM")
+		nodeIndex := os.Getenv("CIRCLE_NODE_INDEX")
+		*status.TargetURL = fmt.Sprintf("https://circleci.com/api/v1.1/project/github/%s/%s/%s/artifacts/%s%s/%s", username, repo, buildNum, nodeIndex, artifactsDir, artifactName)
+	}
 }
-var artifactsDir string
+
+func loadTravisEnv() {
+	parts := strings.Split(os.Getenv("TRAVIS_REPO_SLUG"), "/")
+	if username == "" {
+		username = parts[0]
+	}
+	if repo == "" {
+		repo = parts[1]
+	}
+
+	defaultToEnv(&rev, "TRAVIS_COMMIT")
+	// TODO: artifacts directory
+
+	*status.TargetURL = fmt.Sprintf("https://travis-ci.org/justbuchanan/ci-test/builds/%s", os.Getenv("TRAVIS_BUILD_ID"))
+}
 
 func main() {
 	// Follow these directions to create a token:
@@ -36,6 +69,8 @@ func main() {
 	flag.StringVar(&repo, "repo", "", "Repository name.")
 	flag.StringVar(&rev, "rev", "", "Git commit/revision specifier")
 	flag.BoolVar(&verbose, "verbose", false, "extra logging")
+	flag.BoolVar(&fakeGithubInteraction, "fake_github", false, "For testing purposes, don't talk to github, just log actions.")
+	showOutputFlag := flag.Bool("show_output", true, "display command output")
 	flag.BoolVar(&dontPrintCommand, "h", false, "Don't print command in the output. Use this if it contains secret tokens, etc.")
 
 	flag.StringVar(status.TargetURL, "target_url", "", "Url that this status should redirect to.")
@@ -60,35 +95,19 @@ func main() {
 	artifactsDir := ""
 
 	// get parameters from environment variables if they weren't given in args
-	defaultToEnv(&token, "GITHUB_API_TOKEN")
+	if !fakeGithubInteraction {
+		defaultToEnv(&token, "GITHUB_API_TOKEN")
+	}
 	if os.Getenv("CI") == "true" {
 		if os.Getenv("CIRCLECI") == "true" {
-			defaultToEnv(&username, "CIRCLE_PROJECT_USERNAME")
-			defaultToEnv(&repo, "CIRCLE_PROJECT_REPONAME")
-			defaultToEnv(&rev, "CIRCLE_SHA1")
-			defaultToEnv(&artifactsDir, "CIRCLE_ARTIFACTS")
-
-			if status.GetTargetURL() == "" {
-				// "https://circleci.com/api/v1.1/project/:vcs-type/:org-name/:repo-name/:build_num/artifacts/:container-index/path/to/artifact"
-				// TODO: bitbucket?
-				buildNum := os.Getenv("CIRCLE_BUILD_NUM")
-				nodeIndex := os.Getenv("CIRCLE_NODE_INDEX")
-				*status.TargetURL = fmt.Sprintf("https://circleci.com/api/v1.1/project/github/%s/%s/%s/artifacts/%s%s/%s", username, repo, buildNum, nodeIndex, artifactsDir, logfileName)
-			}
+			loadCircleEnv(logfileName)
 		} else if os.Getenv("TRAVIS") == "true" {
-			parts := strings.Split(os.Getenv("TRAVIS_REPO_SLUG"), "/")
-			if username == "" {
-				username = parts[0]
-			}
-			if repo == "" {
-				repo = parts[1]
-			}
-
-			defaultToEnv(&rev, "TRAVIS_COMMIT")
-			// TODO: artifacts directory
-
-			*status.TargetURL = fmt.Sprintf("https://travis-ci.org/justbuchanan/ci-test/builds/%s", os.Getenv("TRAVIS_BUILD_ID"))
+			loadTravisEnv()
+		} else {
+			log.Print("CI not recognized, continuing anyways.")
 		}
+	} else {
+		log.Print("No CI detected, continuing anyways.")
 	}
 
 	// TODO: validate params
@@ -112,7 +131,7 @@ func main() {
 	// create command, logging outputs to logfile
 	cmd := exec.Command("bash", "-c", taskCmd)
 
-	if true {
+	if *showOutputFlag {
 		// print command output to logfile and stderr
 		mw := io.MultiWriter(os.Stderr, logfile)
 
@@ -150,6 +169,10 @@ func main() {
 }
 
 func postStatus(client *github.Client, ctx context.Context) {
+	if fakeGithubInteraction {
+		log.Printf("[Fake Github] Updating status for '%s' to %s", status.GetContext(), status.GetState())
+		return
+	}
 	ss, resp, err := client.Repositories.CreateStatus(ctx, username, repo, rev, status)
 	if err != nil {
 		log.Fatal(err)
